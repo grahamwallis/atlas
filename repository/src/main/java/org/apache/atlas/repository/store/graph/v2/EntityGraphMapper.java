@@ -210,7 +210,7 @@ public class EntityGraphMapper {
 
                 mapRelationshipAttributes(updatedEntity, vertex, UPDATE, context);
 
-                mapAttributes(updatedEntity, vertex, UPDATE, context);
+                mapAttributes(updatedEntity, vertex, isPartialUpdate?PARTIAL_UPDATE:UPDATE, context);
 
                 if (isPartialUpdate) {
                     resp.addEntity(PARTIAL_UPDATE, constructHeader(updatedEntity, entityType, vertex));
@@ -288,8 +288,9 @@ public class EntityGraphMapper {
             LOG.debug("==> mapAttributes({}, {})", op, struct.getTypeName());
         }
 
+        MetricRecorder metric = RequestContext.get().startMetricRecord("mapAttributes");
+
         if (MapUtils.isNotEmpty(struct.getAttributes())) {
-            MetricRecorder metric = RequestContext.get().startMetricRecord("mapAttributes");
 
             AtlasStructType structType = getStructType(struct.getTypeName());
 
@@ -300,24 +301,86 @@ public class EntityGraphMapper {
                     mapAttribute(attribute, attrValue, vertex, op, context);
                 }
 
-            } else if (op.equals(UPDATE)) {
+            } else if (op.equals(PARTIAL_UPDATE)) {
+
+                /*
+                 * Update only the attributes supplied in the struct
+                 */
+
                 for (String attrName : struct.getAttributes().keySet()) {
                     AtlasAttribute attribute = structType.getAttribute(attrName);
 
                     if (attribute != null) {
                         Object attrValue = struct.getAttribute(attrName);
 
-                        mapAttribute(attribute, attrValue, vertex, op, context);
+                        // Deliberately override 'op' to UPDATE (no change to logic for PARTIAL_UPDATE)
+                        mapAttribute(attribute, attrValue, vertex, UPDATE, context);
+
                     } else {
                         LOG.warn("mapAttributes(): invalid attribute {}.{}. Ignored..", struct.getTypeName(), attrName);
                     }
                 }
             }
+            updateModificationMetadata(vertex);
+        }
 
+        // Do this even when there are no attributes in struct
+        if (op.equals(UPDATE)) {
+
+            /* The following logic applies in the case of a (full) UPDATE (but not a PARTIAL_UPDATE):
+             *
+             * a) to update the value of an attribute provide the attribute and the new value
+             * b) to reset the value of an attribute (to its default value, if any) provide the attribute and value = null
+             * c) to remove an attribute (from the instance) omit the attribute
+             *
+             * In case c) the absence of the attribute relative to the known attributeDefs indicates that
+             * the attribute should be removed. The DELETE op is then used to mapAttribute (rather than
+             * relying on passing a null value, since that is used to reset an attribute to default).
+             */
+
+            AtlasStructType structType = getStructType(struct.getTypeName());
+
+            Map<String, AtlasAttribute> attributes = structType.getAllAttributes();
+
+            /*
+             * Consult the attrDefs - for any attribute that is defined but not supplied issue a delete
+             */
+
+            if (attributes != null && !attributes.isEmpty()) {
+
+                Iterator<String> attributekeys = attributes.keySet().iterator();
+
+                while (attributekeys.hasNext()) {
+
+                    String key = attributekeys.next();
+                    AtlasAttribute attribute = attributes.get(key);
+                    AtlasAttributeDef attrDef = attribute.getAttributeDef();
+                    String attrName = attrDef.getName();
+
+                    // See if the attribute was supplied in struct and set it to the supplied value (including null)
+                    boolean attributeSupplied = false;
+                    Map<String,Object> suppliedAttributes = struct.getAttributes();
+                    if (suppliedAttributes != null && !suppliedAttributes.isEmpty()) {
+                        Set<String> suppliedAttrNames = struct.getAttributes().keySet();
+                        if (suppliedAttrNames.contains(attrName)) {
+                            attributeSupplied = true;
+                            // The attribute is supplied - perform an update, including if its value is null (which will reset it)
+                            Object attrValue = struct.getAttribute(attrName);
+                            mapAttribute(attribute, attrValue, vertex, op, context);
+                        }
+                    }
+                    if (!attributeSupplied) {
+                        // The attribute was not supplied - perform a delete to clear the attribute - the property will be removed from the vertex
+                        mapAttribute(attribute, null, vertex, DELETE, context);
+
+                    }
+                }
+            }
             updateModificationMetadata(vertex);
 
-            RequestContext.get().endMetricRecord(metric);
         }
+
+        RequestContext.get().endMetricRecord(metric);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== mapAttributes({}, {})", op, struct.getTypeName());
@@ -364,25 +427,37 @@ public class EntityGraphMapper {
     }
 
     private void mapAttribute(AtlasAttribute attribute, Object attrValue, AtlasVertex vertex, EntityOperation op, EntityMutationContext context) throws AtlasBaseException {
-        if (attrValue == null) {
-            AtlasAttributeDef attributeDef = attribute.getAttributeDef();
-            AtlasType         attrType     = attribute.getAttributeType();
+        switch (op) {
 
-            if (attrType.getTypeCategory() == TypeCategory.PRIMITIVE) {
-                if (attributeDef.getDefaultValue() != null) {
-                    attrValue = attrType.createDefaultValue(attributeDef.getDefaultValue());
-                } else {
-                    if (attribute.getAttributeDef().getIsOptional()) {
-                        attrValue = attrType.createOptionalDefaultValue();
-                    } else {
-                        attrValue = attrType.createDefaultValue();
+            case UPDATE:
+                // If performing an update then allow attributes with null value to acquire default values
+                if (attrValue == null) {
+                    AtlasAttributeDef attributeDef = attribute.getAttributeDef();
+                    AtlasType attrType = attribute.getAttributeType();
+
+                    if (attrType.getTypeCategory() == TypeCategory.PRIMITIVE) {
+                        if (attributeDef.getDefaultValue() != null) {
+                            attrValue = attrType.createDefaultValue(attributeDef.getDefaultValue());
+                        } else {
+                            if (attribute.getAttributeDef().getIsOptional()) {
+                                attrValue = attrType.createOptionalDefaultValue();
+                            } else {
+                                attrValue = attrType.createDefaultValue();
+                            }
+                        }
                     }
                 }
-            }
+                break;
+
+            case DELETE:
+                // If performing a delete then force attribute value to null and map
+                attrValue = null;
+                break;
+
         }
 
-        AttributeMutationContext ctx = new AttributeMutationContext(op, vertex, attribute, attrValue);
-
+        // Deliberately override op to UPDATE (even for a DELETE, where you need to map with the value set to null)
+        AttributeMutationContext ctx = new AttributeMutationContext(UPDATE, vertex, attribute, attrValue);
         mapToVertexByTypeCategory(ctx, context);
     }
 
