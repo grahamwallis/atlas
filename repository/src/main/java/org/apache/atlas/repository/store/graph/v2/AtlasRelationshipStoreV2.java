@@ -31,6 +31,7 @@ import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.instance.AtlasRelationship.AtlasRelationshipWithExtInfo;
+import org.apache.atlas.model.notification.EntityNotification.EntityNotificationV2.OperationType;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags;
 import org.apache.atlas.model.typedef.AtlasRelationshipEndDef;
@@ -76,6 +77,7 @@ import static org.apache.atlas.repository.Constants.PROVENANCE_TYPE_KEY;
 import static org.apache.atlas.repository.Constants.RELATIONSHIPTYPE_TAG_PROPAGATION_KEY;
 import static org.apache.atlas.repository.Constants.RELATIONSHIP_GUID_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.VERSION_PROPERTY_KEY;
+import static org.apache.atlas.AtlasConfiguration.NOTIFICATION_RELATIONSHIPS_ENABLED;
 
 
 import static org.apache.atlas.repository.graph.GraphHelper.getBlockedClassificationIds;
@@ -93,6 +95,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasRelationshipStoreV2.class);
 
     private static final Long DEFAULT_RELATIONSHIP_VERSION = 0L;
+    private boolean notificationsEnabled = NOTIFICATION_RELATIONSHIPS_ENABLED.getBoolean();
 
     private final AtlasTypeRegistry         typeRegistry;
     private final EntityGraphRetriever      entityRetriever;
@@ -127,9 +130,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== create({}): {}", relationship, ret);
         }
-
-        // notify entities for added/removed classification propagation
-        entityChangeNotifier.notifyPropagatedEntities();
 
         return ret;
     }
@@ -198,9 +198,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         validateRelationship(end1Vertex, end2Vertex, edgeType, relationship.getAttributes());
 
         AtlasRelationship ret = updateRelationship(edge, relationship);
-
-        // notify entities for added/removed classification propagation
-        entityChangeNotifier.notifyPropagatedEntities();
+        sendNotifications(ret, OperationType.RELATIONSHIP_UPDATE);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== update({}): {}", relationship, ret);
@@ -280,8 +278,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
         deleteDelegate.getHandler().deleteRelationships(Collections.singleton(edge), forceDelete);
 
-        // notify entities for added/removed classification propagation
-        entityChangeNotifier.notifyPropagatedEntities();
+        sendNotifications(getById(guid), OperationType.RELATIONSHIP_DELETE);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== deleteById({}): {}", guid);
@@ -368,6 +365,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
         }
 
+        sendNotifications(entityRetriever.mapEdgeToAtlasRelationship(ret), OperationType.RELATIONSHIP_CREATE);
         return ret;
     }
 
@@ -458,6 +456,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     }
 
     // propagated classifications should contain blocked propagated classification
+
     private AtlasVertex validateBlockedPropagatedClassification(List<AtlasVertex> classificationVertices, AtlasClassification classification) {
         AtlasVertex ret = null;
 
@@ -473,7 +472,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
         return ret;
     }
-
     private void addToBlockedClassificationIds(AtlasEdge edge, List<String> classificationIds) {
         if (edge != null) {
             if (classificationIds.isEmpty()) {
@@ -869,5 +867,12 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         }
 
         return (attribute != null) ? attribute.getRelationshipEdgeLabel() : null;
+    }
+
+    private void sendNotifications(AtlasRelationship ret, OperationType relationshipUpdate) throws AtlasBaseException {
+        entityChangeNotifier.notifyPropagatedEntities();
+        if (notificationsEnabled){
+            entityChangeNotifier.notifyRelationshipMutation(ret, relationshipUpdate);
+        }
     }
 }
