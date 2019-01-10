@@ -19,6 +19,7 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasPrivilege;
@@ -43,6 +44,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
+import org.apache.atlas.store.DeleteType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -73,9 +75,12 @@ import static org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.
 import static org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.TWO_TO_ONE;
 import static org.apache.atlas.repository.Constants.ENTITY_TYPE_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.HOME_ID_KEY;
+import static org.apache.atlas.repository.Constants.MODIFICATION_TIMESTAMP_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.MODIFIED_BY_KEY;
 import static org.apache.atlas.repository.Constants.PROVENANCE_TYPE_KEY;
 import static org.apache.atlas.repository.Constants.RELATIONSHIPTYPE_TAG_PROPAGATION_KEY;
 import static org.apache.atlas.repository.Constants.RELATIONSHIP_GUID_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.STATE_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.VERSION_PROPERTY_KEY;
 import static org.apache.atlas.AtlasConfiguration.NOTIFICATION_RELATIONSHIPS_ENABLED;
 
@@ -265,8 +270,11 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
             throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_GUID_NOT_FOUND, guid);
         }
 
-        if (getState(edge) == DELETED) {
-            throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_ALREADY_DELETED, guid);
+        // If this is a hard delete then expect the state to be already DELETED
+        if (RequestContext.get().getDeleteType() == DeleteType.SOFT) {
+            if (getState(edge) == DELETED) {
+                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_ALREADY_DELETED, guid);
+            }
         }
 
         String            relationShipType = GraphHelper.getTypeName(edge);
@@ -276,9 +284,14 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry,AtlasPrivilege.RELATIONSHIP_REMOVE, relationShipType, end1Entity, end2Entity ));
 
 
+        // Get a copy of the deleted relationship before it actually disappears. sendNotification will need it. Alternatively move the notification
+        // to immediately prior to the actual delete.
+        AtlasRelationship deletedRelationship = getById(guid);
+
         deleteDelegate.getHandler().deleteRelationships(Collections.singleton(edge), forceDelete);
 
-        sendNotifications(getById(guid), OperationType.RELATIONSHIP_DELETE);
+        //sendNotifications(getById(guid), OperationType.RELATIONSHIP_DELETE);
+        sendNotifications(deletedRelationship, OperationType.RELATIONSHIP_DELETE);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== deleteById({}): {}", guid);
@@ -379,6 +392,16 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.RELATIONSHIP_UPDATE, relationship.getTypeName(), end1Entity, end2Entity));
 
         updateTagPropagations(relationshipEdge, relationship);
+
+
+        // Update valid system attributes
+        AtlasGraphUtilsV2.setEncodedProperty(relationshipEdge, HOME_ID_KEY, relationship.getHomeId());
+        AtlasGraphUtilsV2.setEncodedProperty(relationshipEdge, VERSION_PROPERTY_KEY, getRelationshipVersion(relationship));
+        AtlasGraphUtilsV2.setEncodedProperty(relationshipEdge, PROVENANCE_TYPE_KEY, relationship.getProvenanceType());
+        AtlasGraphUtilsV2.setEncodedProperty(relationshipEdge, MODIFIED_BY_KEY, relationship.getUpdatedBy());
+        AtlasGraphUtilsV2.setEncodedProperty(relationshipEdge, MODIFICATION_TIMESTAMP_PROPERTY_KEY, relationship.getUpdateTime());
+        AtlasGraphUtilsV2.setEncodedProperty(relationshipEdge, STATE_PROPERTY_KEY, relationship.getStatus());
+
 
         if (MapUtils.isNotEmpty(relationType.getAllAttributes())) {
             for (AtlasAttribute attr : relationType.getAllAttributes().values()) {

@@ -102,7 +102,8 @@ public abstract class DeleteHandlerV1 {
             String              guid = AtlasGraphUtilsV2.getIdFromVertex(instanceVertex);
             AtlasEntity.Status state = getState(instanceVertex);
 
-            if (state == DELETED || requestContext.isDeletedEntity(guid)) {
+            // Skip the delete if (and only if) this is a soft delete and the entity was already deleted
+            if ( (softDelete && state == DELETED) || requestContext.isDeletedEntity(guid)) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Skipping deletion of {} as it is already deleted", guid);
                 }
@@ -146,7 +147,8 @@ public abstract class DeleteHandlerV1 {
         for (AtlasEdge edge : edges) {
             boolean isInternal = isInternalType(edge.getInVertex()) && isInternalType(edge.getOutVertex());
 
-            if (!isInternal && getState(edge) == DELETED) {
+            // Skip the delete if (and only if) this is a soft delete and the relationship is not internal and was already deleted
+            if (!isInternal && (softDelete && getState(edge) == DELETED)) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Skipping deletion of {} as it is already deleted", getIdFromEdge(edge));
                 }
@@ -179,7 +181,8 @@ public abstract class DeleteHandlerV1 {
             AtlasVertex        vertex = vertices.pop();
             AtlasEntity.Status state  = getState(vertex);
 
-            if (state == DELETED) {
+            // Only skip vertex if this is a soft delete - hard delete needs to process it
+            if (softDelete && state == DELETED) {
                 //If the reference vertex is marked for deletion, skip it
                 continue;
             }
