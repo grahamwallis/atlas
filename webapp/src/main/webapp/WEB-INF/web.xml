@@ -41,6 +41,24 @@
         <url-pattern>/api/atlas/*</url-pattern>
     </servlet-mapping>
 
+
+    <servlet>
+        <servlet-name>open-metadata</servlet-name>
+        <servlet-class>
+            org.springframework.web.servlet.DispatcherServlet
+        </servlet-class>
+        <init-param>
+            <param-name>contextConfigLocation</param-name>
+            <param-value>/WEB-INF/openMetadataContext.xml</param-value>
+        </init-param>
+        <load-on-startup>2</load-on-startup>
+    </servlet>
+
+    <servlet-mapping>
+        <servlet-name>open-metadata</servlet-name>
+        <url-pattern>/egeria/*</url-pattern>
+    </servlet-mapping>
+
     <filter>
         <filter-name>springSecurityFilterChain</filter-name>
         <filter-class>org.springframework.web.filter.DelegatingFilterProxy</filter-class>

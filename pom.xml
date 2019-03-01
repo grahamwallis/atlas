@@ -673,6 +673,7 @@
         <guava.version>19.0</guava.version>
         <scala.version>2.11.12</scala.version>
         <antlr4.version>4.7</antlr4.version>
+        <egeria.version>1.1-SNAPSHOT</egeria.version>
 
         <!-- Needed for hooks -->
         <aopalliance.version>1.0</aopalliance.version>
@@ -744,7 +745,7 @@
     <modules>
         <module>build-tools</module>
         <module>test-tools</module>
-
+        <module>open-metadata</module>
         <module>intg</module>
         <module>common</module>
         <module>server-api</module>
@@ -1419,6 +1420,12 @@
                 <artifactId>atlas-webapp</artifactId>
                 <version>${project.version}</version>
                 <type>war</type>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>open-metadata</artifactId>
+                <version>${project.version}</version>
             </dependency>
 
             <dependency>

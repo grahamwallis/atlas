@@ -749,6 +749,7 @@ public abstract class SearchProcessor {
             case '%':
             case '@':
             case '=':
+            case '.':
                 return true;
         }
 
