@@ -10715,13 +10715,13 @@ public class LocalAtlasOMRSMetadataCollection extends OMRSMetadataCollection {
             if (entity.getCreatedBy() == null) {
                 missingFieldNames.add("createdBy");
             }
-            if (entity.getUpdatedBy() == null) {
+            if (entity.getVersion() > 1 && entity.getUpdatedBy() == null) {
                 missingFieldNames.add("updatedBy");
             }
             if (entity.getCreateTime() == null) {
                 missingFieldNames.add("createTime");
             }
-            if (entity.getUpdateTime() == null) {
+            if (entity.getVersion() > 1 && entity.getUpdateTime() == null) {
                 missingFieldNames.add("updateTime");
             }
             if (entity.getStatus() == null) {
@@ -11308,13 +11308,13 @@ public class LocalAtlasOMRSMetadataCollection extends OMRSMetadataCollection {
             if (relationship.getCreatedBy() == null) {
                 missingFieldNames.add("createdBy");
             }
-            if (relationship.getUpdatedBy() == null) {
+            if (relationship.getVersion() > 1 && relationship.getUpdatedBy() == null) {
                 missingFieldNames.add("updatedBy");
             }
             if (relationship.getCreateTime() == null) {
                 missingFieldNames.add("createTime");
             }
-            if (relationship.getUpdateTime() == null) {
+            if (relationship.getVersion() > 1 && relationship.getUpdateTime() == null) {
                 missingFieldNames.add("updateTime");
             }
             if (relationship.getStatus() == null) {
